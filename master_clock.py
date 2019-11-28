@@ -11,7 +11,10 @@ import rtmidi
 import numpy as np
 import random
 
-# Setting up Music Theory
+#
+# MIDI value for key roots
+#
+
 key_roots = {
     "C": 48,
     "Db": 49,
@@ -27,6 +30,10 @@ key_roots = {
     "B": 59
 }
 
+#
+# Scales based on semitone interval from tonic/root
+#
+
 major_pentatonic = np.array([0, 2, 4, 7, 9, 12, 0, 7])
 minor_blues = np.array([0, 3, 5, 6, 7, 10, 12, 6])
 major_scale = np.array([0, 2, 4, 5, 7, 9, 11, 12])
@@ -38,7 +45,10 @@ diminished_scale = np.array([0, 2, 3, 5, 6, 8, 9, 11])
 scales = np.array([major_pentatonic, major_scale, minor_blues, minor_scale,
                    minor_pentatonic, harmonic_minor_scale, altered_scale, diminished_scale])
 
-# chords in terms of intervals
+#
+# Chords based on semitone interval from tonic/root
+#
+
 major_triad = np.array([0, 7, 12, 16])
 minor_7 = np.array([0, 7, 10, 15])
 major_7 = np.array([0, 7, 11, 16])
@@ -46,20 +56,47 @@ major_5 = np.array([0, 4, 7, 12])
 dom_7 = np.array([4, 10, 12, 19])
 dim_7 = np.array([2, 9, 11, 17])
 stacked_fifths = np.array([-12, 0, 7, 14])
-# what chords correspond to scales I to VII
-major_chords = np.array([major_5, minor_7, minor_7, major_5, dom_7 - 12, minor_7 - 12, dim_7 - 12])
-minor_chords = np.array([minor_7, dim_7, major_7, minor_7 - 12, minor_7 - 12, major_7 - 12, dom_7 - 12])
 
-mode_chords = np.array([major_chords, minor_chords])
-# Set up priority of chords
+# Mapping Chords to scale tones
+major_chords = np.array(
+    [major_5, minor_7, minor_7, major_5, dom_7 - 12, minor_7 - 12, dim_7 - 12])
+minor_chords = np.array(
+    [minor_7, dim_7, major_7, minor_7 - 12, minor_7 - 12, major_7 - 12, dom_7 - 12])
+
+major_minor_chords = np.array([major_chords, minor_chords])
+
+# Priority of chords from most important (0) to least important (6)
 chord_priority = [0, 3, 4, 1, 5, 2, 6]
 
-# Set tempo
+#
+# Set timing properties
+#
+
 tempo = 120
 subdivs = 16
 num_inst = 6
+
+#
+# Initialize rtmidi port connections >_<
+#
+#   Use "print(midiout.get_ports())" to show available virtual ports
+#
+#   sendMessage( Channel , MIDI Note , Value (Velocity, Level, etc.) )
+#
+#   Channel:
+#
+#       0x8- Note On
+#       0x9- Note Off
+#
+#       0x-0 Port 0 : Drums
+#       0x-1 Port 1 : Chords
+#       0x-2 Port 2 : Melody
+#       0x-3 Port 3 : Bass
+#       0x-4 Port 4 : Pads
+#       0x-5 Port 5 : Pads (on)
+#
+
 midiout = rtmidi.MidiOut()
-# print(midiout.get_ports())
 
 midiout.open_port(2)
 
@@ -73,19 +110,24 @@ note_map = np.zeros((num_inst, subdivs))
 bpm = sleep_time = 60 / (tempo * subdivisions)
 offset = 0
 
+# initialize drums & chords
 for i in range(0, subdivs, subdivisions):
     note_map[0, i] = 1
-for i in range(subdivisions, subdivs, subdivisions*2):
+for i in range(subdivisions, subdivs, subdivisions * 2):
     note_map[1, i] = 1
+
+# Initialize pad
 note_map[5, 0] = 1
 
-# Single Downbeat
-single_beat = np.array(1)
+#
+# Initial state
+#
 
 key = key_roots["F"]
 scale = 1
 key_notes = key + scales[scale]
-subdiv_level = [8, 8, 8, 4, 4, 4, 4, 4, 4, 2, 2, 2, 2, 2, 1, 1]
+subdiv_level = [8, 8, 8, 4, 4, 4, 4, 4, 4, 2, 2, 2, 2,
+                2, 1, 1]  # How close notes are based on intensity
 playing_chord = -1
 playing_bass = -1
 playing_note = -1
@@ -93,7 +135,7 @@ melody_note = 0
 chord_root = 0
 index_counter = 0
 octave = 0
-mode = 1
+major_minor = 1
 intensity = -1
 intensity_cat = 0
 resolved = False
@@ -103,13 +145,7 @@ def clamp(n, minn, maxn):
     return max(min(maxn, n), minn)
 
 
-def get_input():
-    f = open("fancy-out.txt", 'r')
-    fp = f.read().splitlines()
-    f.close()
-    return [int(x) for x in fp[len(fp) - 1].split(',')]
-
-
+# Iterate through all channels & send note off to all MIDI notes
 def clear_channels():
     for channel in range(num_inst):
         for i in range(127):
@@ -134,12 +170,12 @@ def play_chords(on, chord):
     if on:
         global playing_chord
         if playing_chord != -1:
-            for n in mode_chords[mode, playing_chord]:
+            for n in major_minor_chords[major_minor, playing_chord]:
                 send_chords(False, key_notes[playing_chord] + n)
         playing_chord = chord
     else:
         playing_chord = -1
-    for n in mode_chords[mode, chord]:
+    for n in major_minor_chords[major_minor, chord]:
         send_chords(on, key_notes[chord] + n)
 
 
@@ -150,7 +186,8 @@ def play_lead(on, note):
         if playing_note != -1:
             midiout.send_message([0x82, playing_note, 0])
         playing_note = note + octave * 12
-        midiout.send_message([0x92, note + octave * 12, random.randint(64, 112)])
+        midiout.send_message(
+            [0x92, note + octave * 12, random.randint(64, 112)])
     else:
         if playing_note != -1:
             midiout.send_message(([0x82, playing_note, 0]))
@@ -180,12 +217,16 @@ def key_change(new_key, new_scale):
     global key
     global key_notes
     global scale
-    global mode
+    global major_minor
     key = key_roots[new_key]
     scale = new_scale
-    mode = 0
+    major_minor = 0
     key_notes = key + scales[new_scale]
 
+
+#
+#
+#
 
 def update_note_map(sdiv, index):
     # updating notes
@@ -201,8 +242,6 @@ def update_note_map(sdiv, index):
     global intensity_cat
     global resolved
 
-    # latest_sensor_data = get_input()
-
     # melody
     note_on = random.randrange(-1, 2, 2)
     note_length = random.randint(2, 6)
@@ -216,13 +255,17 @@ def update_note_map(sdiv, index):
         melody_note = (melody_note + melody_note_change) % 8
         note_map[4, sdiv] = note_on
         note_map[4, min(sdiv + 1, subdivs - 1): sdiv + note_length - 1] = 0
-        note_map[4, min(sdiv + 3*note_length, subdivs - 1)] = -note_on
+        note_map[4, min(sdiv + 3 * note_length, subdivs - 1)] = -note_on
+
     # Change Chord Longer
     if random.random() < 0.35:
         note_map[3, sdiv] = note_on
-        note_map[3, min(sdiv + 1, subdivs - 1):min(sdiv + 3*note_length, subdivs - 1)] = 0
-        note_map[3, min(sdiv + 1, subdivs - 1):min(sdiv + 3*note_length, subdivs - 1)] = 0
+        note_map[3, min(sdiv + 1, subdivs - 1):min(sdiv +
+                                                   3 * note_length, subdivs - 1)] = 0
+        note_map[3, min(sdiv + 1, subdivs - 1):min(sdiv +
+                                                   3 * note_length, subdivs - 1)] = 0
 
+    # Resolves to C Major at end
     if not resolved:
         intens_change_prob = random.random()
         if intens_change_prob < 0.05:
@@ -249,7 +292,8 @@ def update_note_map(sdiv, index):
             # turn on/off hi hats
             note_map[2, ] = np.repeat(0, subdivs)
             # randomly distribute kicks
-            note_map[0, range(0, subdivs, int(subdivisions/2))] = random.randint(0, 1)
+            note_map[0, range(0, subdivs, int(subdivisions / 2))
+                     ] = random.randint(0, 1)
             clear_channels()
             intensity_cat = 1
             octave = 1
@@ -264,9 +308,10 @@ def update_note_map(sdiv, index):
             octave = 1
             clear_channels()
             # randomly distribute kicks
-            note_map[0, range(0, subdivs, int(subdivisions/2))] = random.randint(0, 1)
+            note_map[0, range(0, subdivs, int(subdivisions / 2))
+                     ] = random.randint(0, 1)
             # Set bass line
-            note_map[5, ] = np.repeat([1, 0, 1, 0], subdivs/4)
+            note_map[5, ] = np.repeat([1, 0, 1, 0], subdivs / 4)
             # set intensity category
             intensity_cat = 2
             # Harmonic Minor
@@ -280,9 +325,10 @@ def update_note_map(sdiv, index):
             octave = 1
             clear_channels()
             # randomly distribute kicks
-            note_map[0, range(0, subdivs, int(subdivisions/2))] = random.randint(0, 1)
+            note_map[0, range(0, subdivs, int(subdivisions / 2))
+                     ] = random.randint(0, 1)
             # Set bass line
-            note_map[5, ] = np.repeat([1, 0, 1, 0], subdivs/4)
+            note_map[5, ] = np.repeat([1, 0, 1, 0], subdivs / 4)
             # set intensity category
             intensity_cat = 3
             # Harmonic Minor
@@ -294,7 +340,8 @@ def update_note_map(sdiv, index):
             # turn on/off hi hats
             note_map[2, ] = np.repeat(random.randint(0, 1), subdivs)
             # randomly distribute kicks
-            note_map[0, range(0, subdivs, int(subdivisions/2))] = random.randint(0, 1)
+            note_map[0, range(0, subdivs, int(subdivisions / 2))
+                     ] = random.randint(0, 1)
             octave = 2
             # Set bass line
             note_map[5, ] = np.repeat(1, subdivs)
@@ -311,7 +358,8 @@ def update_note_map(sdiv, index):
             # turn on/off hi hats
             note_map[2, ] = np.repeat(1, subdivs)
             # randomly distribute kicks
-            note_map[0, ] = np.array([1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0])
+            note_map[0, ] = np.array(
+                [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0])
             octave = 3
             clear_channels()
             intensity_cat = 5
@@ -324,6 +372,10 @@ def update_note_map(sdiv, index):
             # Turn off snares
             note_map[1, ] = np.repeat(0, subdivs)
 
+
+#
+# Main loop that runs while playing
+#
 
 while True:
     sleep_time = max([0, (bpm - offset)])

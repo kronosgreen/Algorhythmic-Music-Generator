@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
+
 """Plot the live microphone signal(s) with matplotlib."""
+
 import argparse
 from queue import Queue, Empty
 
